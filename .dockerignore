@@ -1,0 +1,9 @@
+.git
+.env
+.env.*
+frontend/node_modules
+frontend/dist
+internal/web/dist
+tmp
+coverage.out
+coverage

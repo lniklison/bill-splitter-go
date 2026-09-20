@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+coverage.out
+coverage/
+frontend/node_modules/
+frontend/dist/
+internal/web/dist/*
+!internal/web/dist/placeholder.txt
+tmp/
+CONTEXT.md
+docs/plans/
