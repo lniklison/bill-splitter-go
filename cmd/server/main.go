@@ -41,12 +41,14 @@ func main() {
 	billRepository := repository.NewPostgres(pool)
 	billService := bills.NewService(billRepository)
 	billHTTP := controller.NewHTTP(billService)
+	frontend := appweb.Handler()
 	mux.HandleFunc("GET /bills/{id}/shares", billHTTP.GetShares)
 	mux.HandleFunc("PUT /bills/{id}/shares", billHTTP.ReplaceShares)
 	mux.HandleFunc("/bills/{id}/shares", billHTTP.MethodNotAllowed)
+	mux.Handle("GET /bills/{id}", frontend)
 	mux.HandleFunc("/bills", billHTTP.InvalidPath)
 	mux.HandleFunc("/bills/", billHTTP.InvalidPath)
-	mux.Handle("/", appweb.Handler())
+	mux.Handle("/", frontend)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/bills") && path.Clean(r.URL.Path) != r.URL.Path {
 			billHTTP.InvalidPath(w, r)

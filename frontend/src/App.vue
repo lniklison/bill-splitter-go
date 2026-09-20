@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 import { BillsApiError, getBillShares, replaceBillShares } from "./api/bills"
 import { allocateDraft } from "./allocation"
 import ShareRow from "./components/ShareRow.vue"
 import { formatPercentage, parsePercentage } from "./decimal"
 import type { BillShares, DraftShare, RowErrors } from "./types"
 
-const billID = 1
+const defaultBillID = 1
 let nextDraftKey = 1
+let loadSequence = 0
 
+const currentBillID = ref<number | null>(null)
+const billIDInput = ref("")
+const billLookupError = ref("")
 const serverAllocation = ref<BillShares | null>(null)
 const draft = ref<DraftShare[]>([])
 const loading = ref(true)
+const invalidRoute = ref(false)
 const saving = ref(false)
 const loadError = ref("")
 const saveError = ref("")
@@ -89,18 +94,85 @@ function clearSaveStatus() {
   successMessage.value = ""
 }
 
-async function load() {
+function billIDFromPath(pathname: string): number | null {
+  const match = pathname.match(/^\/bills\/([1-9]\d*)$/)
+  if (!match) {
+    return null
+  }
+
+  const billID = Number(match[1])
+  return Number.isSafeInteger(billID) ? billID : null
+}
+
+async function load(billID: number) {
+  const sequence = ++loadSequence
+  currentBillID.value = billID
+  billIDInput.value = billID.toString()
+  billLookupError.value = ""
+  invalidRoute.value = false
   loading.value = true
   loadError.value = ""
-  successMessage.value = ""
+  clearSaveStatus()
+  serverAllocation.value = null
+  draft.value = []
   try {
     const allocation = await getBillShares(billID)
+    if (sequence !== loadSequence) {
+      return
+    }
     serverAllocation.value = allocation
     draft.value = draftFor(allocation)
   } catch (error) {
+    if (sequence !== loadSequence) {
+      return
+    }
     loadError.value = messageFor(error)
   } finally {
+    if (sequence === loadSequence) {
+      loading.value = false
+    }
+  }
+}
+
+function loadFromLocation() {
+  if (window.location.pathname === "/") {
+    window.history.replaceState(null, "", `/bills/${defaultBillID}`)
+  }
+
+  const billID = billIDFromPath(window.location.pathname)
+  if (billID === null) {
+    loadSequence += 1
+    currentBillID.value = null
+    serverAllocation.value = null
+    draft.value = []
     loading.value = false
+    invalidRoute.value = true
+    loadError.value = ""
+    clearSaveStatus()
+    return
+  }
+  void load(billID)
+}
+
+function findBill() {
+  const value = billIDInput.value.trim()
+  const billID = Number(value)
+  if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(billID)) {
+    billLookupError.value = "Enter a positive whole-number bill ID."
+    return
+  }
+
+  billLookupError.value = ""
+  const path = `/bills/${billID}`
+  if (window.location.pathname !== path) {
+    window.history.pushState(null, "", path)
+  }
+  void load(billID)
+}
+
+function retryLoad() {
+  if (currentBillID.value !== null) {
+    void load(currentBillID.value)
   }
 }
 
@@ -123,7 +195,7 @@ function removeShare(key: number) {
 }
 
 async function save() {
-  if (!canSave.value) {
+  if (!canSave.value || currentBillID.value === null) {
     return
   }
 
@@ -131,7 +203,7 @@ async function save() {
   clearSaveStatus()
   try {
     const allocation = await replaceBillShares(
-      billID,
+      currentBillID.value,
       draft.value.map((row) => ({
         personName: row.personName.trim(),
         percentage: row.percentage,
@@ -147,7 +219,11 @@ async function save() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  loadFromLocation()
+  window.addEventListener("popstate", loadFromLocation)
+})
+onBeforeUnmount(() => window.removeEventListener("popstate", loadFromLocation))
 </script>
 
 <template>
@@ -158,15 +234,38 @@ onMounted(load)
       <p v-if="serverAllocation" class="bill-total">
         Bill total <strong>€{{ serverAllocation.bill.totalAmount }}</strong>
       </p>
+      <form class="bill-lookup" aria-label="Find a bill" @submit.prevent="findBill">
+        <div class="field bill-id-field">
+          <label for="bill-id">Bill ID</label>
+          <input
+            id="bill-id"
+            v-model="billIDInput"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
+            :aria-invalid="Boolean(billLookupError)"
+            :aria-describedby="billLookupError ? 'bill-id-error' : undefined"
+            @input="billLookupError = ''"
+          />
+          <p v-if="billLookupError" id="bill-id-error" class="field-error">
+            {{ billLookupError }}
+          </p>
+        </div>
+        <button type="submit" class="secondary-button">Load bill</button>
+      </form>
     </header>
 
-    <section v-if="loading" class="state-card" aria-live="polite">
+    <section v-if="invalidRoute" class="state-card error-state" role="alert">
+      <p>Invalid bill URL. Enter a bill ID above to continue.</p>
+    </section>
+
+    <section v-else-if="loading" class="state-card" aria-live="polite">
       <p>Loading bill shares…</p>
     </section>
 
     <section v-else-if="loadError" class="state-card error-state" role="alert">
       <p>{{ loadError }}</p>
-      <button type="button" @click="load">Retry</button>
+      <button type="button" @click="retryLoad">Retry</button>
     </section>
 
     <form v-else class="editor" @submit.prevent="save">
