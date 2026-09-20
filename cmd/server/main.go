@@ -7,9 +7,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/lniklison/bill-splitter-go/internal/bills"
+	"github.com/lniklison/bill-splitter-go/internal/bills/controller"
+	"github.com/lniklison/bill-splitter-go/internal/bills/repository"
 	"github.com/lniklison/bill-splitter-go/internal/database"
 	appweb "github.com/lniklison/bill-splitter-go/internal/web"
 )
@@ -33,11 +38,26 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	})
+	billRepository := repository.NewPostgres(pool)
+	billService := bills.NewService(billRepository)
+	billHTTP := controller.NewHTTP(billService)
+	mux.HandleFunc("GET /bills/{id}/shares", billHTTP.GetShares)
+	mux.HandleFunc("PUT /bills/{id}/shares", billHTTP.ReplaceShares)
+	mux.HandleFunc("/bills/{id}/shares", billHTTP.MethodNotAllowed)
+	mux.HandleFunc("/bills", billHTTP.InvalidPath)
+	mux.HandleFunc("/bills/", billHTTP.InvalidPath)
 	mux.Handle("/", appweb.Handler())
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/bills") && path.Clean(r.URL.Path) != r.URL.Path {
+			billHTTP.InvalidPath(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 
 	server := &http.Server{
 		Addr:              ":8080",
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
