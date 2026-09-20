@@ -6,6 +6,6 @@ export default defineConfig({
   plugins: [vue()],
   build: {
     outDir: fileURLToPath(new URL("../internal/web/dist", import.meta.url)),
-    emptyOutDir: false,
+    emptyOutDir: true,
   },
 })
